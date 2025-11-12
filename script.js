@@ -21,6 +21,7 @@ const MAX_RETRY_ATTEMPTS = 3, RETRY_DELAY = 5000;
 // New global variables for extended features
 let expenses = [], purchases = [], stockAlerts = [], profitData = [];
 let expenseCategories = ['Rent', 'Utilities', 'Salaries', 'Supplies', 'Marketing', 'Maintenance', 'Other'];
+let appRealtimeChannel = null;
 
 // Settings - Changed from const to let to allow reassignment
 let settings = {
@@ -230,6 +231,19 @@ window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPrompt = e;
     installBtn.style.display = 'flex';
+
+    const triggerInstall = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            installBtn.style.display = 'none';
+        }
+        deferredPrompt = null;
+    };
+
+    window.addEventListener('pointerdown', triggerInstall, { once: true });
+    window.addEventListener('keydown', triggerInstall, { once: true });
 });
 
 installBtn.addEventListener('click', async () => {
@@ -237,7 +251,6 @@ installBtn.addEventListener('click', async () => {
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
-        console.log('User accepted the install prompt');
         installBtn.style.display = 'none';
     }
     deferredPrompt = null;
@@ -1781,67 +1794,58 @@ function cleanupDuplicateSales() {
 }
 
 function setupRealtimeListeners() {
-    if (isOnline) {
-        supabase
-            .channel('products-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-                DataModule.fetchProducts().then(updatedProducts => {
-                    products = updatedProducts;
-                    saveToLocalStorage();
-                    loadProducts();
-                    checkAndGenerateAlerts();
-                });
-            })
-            .subscribe();
-        
-        supabase
-            .channel('sales-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
-                DataModule.fetchSales().then(updatedSales => {
-                    sales = updatedSales;
-                    saveToLocalStorage();
-                    loadSales();
-                });
-            })
-            .subscribe();
-        
-        supabase
-            .channel('deleted-sales-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'deleted_sales' }, () => {
-                DataModule.fetchDeletedSales().then(updatedDeletedSales => {
-                    deletedSales = updatedDeletedSales;
-                    saveToLocalStorage();
-                    loadDeletedSales();
-                });
-            })
-            .subscribe();
-        
-        supabase
-            .channel('expenses-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
-                DataModule.fetchExpenses().then(updatedExpenses => {
-                    expenses = updatedExpenses;
-                    saveToLocalStorage();
-                    if (currentPage === 'expenses') {
-                        loadExpenses();
-                    }
-                });
-            })
-            .subscribe();
-        
-        supabase
-            .channel('purchases-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => {
-                DataModule.fetchPurchases().then(updatedPurchases => {
-                    purchases = updatedPurchases;
-                    saveToLocalStorage();
-                    if (currentPage === 'purchases') {
-                        loadPurchases();
-                    }
-                });
-            })
-            .subscribe();
-    }
+    if (!isOnline) return;
+    if (appRealtimeChannel) return;
+
+    const channel = supabase.channel('app-changes');
+
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+        DataModule.fetchProducts().then(updatedProducts => {
+            products = updatedProducts;
+            saveToLocalStorage();
+            loadProducts();
+            checkAndGenerateAlerts();
+        });
+    });
+
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+        DataModule.fetchSales().then(updatedSales => {
+            sales = updatedSales;
+            saveToLocalStorage();
+            loadSales();
+        });
+    });
+
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'deleted_sales' }, () => {
+        DataModule.fetchDeletedSales().then(updatedDeletedSales => {
+            deletedSales = updatedDeletedSales;
+            saveToLocalStorage();
+            loadDeletedSales();
+        });
+    });
+
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
+        DataModule.fetchExpenses().then(updatedExpenses => {
+            expenses = updatedExpenses;
+            saveToLocalStorage();
+            if (currentPage === 'expenses') {
+                loadExpenses();
+            }
+        });
+    });
+
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => {
+        DataModule.fetchPurchases().then(updatedPurchases => {
+            purchases = updatedPurchases;
+            saveToLocalStorage();
+            if (currentPage === 'purchases') {
+                loadPurchases();
+            }
+        });
+    });
+
+    channel.subscribe();
+    appRealtimeChannel = channel;
 }
 
 // Local Storage Functions
@@ -2402,102 +2406,104 @@ function loadProducts() {
 function loadInventory() {
     const inventoryLoading = document.getElementById('inventory-loading');
     if (inventoryLoading) inventoryLoading.style.display = 'flex';
-    
-    setTimeout(() => {
-        if (inventoryLoading) inventoryLoading.style.display = 'none';
-        
-        if (products.length === 0) {
-            inventoryTableBody.innerHTML = `
-                <tr>
-                    <td colspan="8" style="text-align: center;">No products in inventory</td>
-                </tr>
-            `;
-            const inventoryTotalValue = document.getElementById('inventory-total-value');
-            if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(0);
-            return;
-        }
-        
-        let totalValue = 0;
-        inventoryTableBody.innerHTML = '';
-        
-        products.forEach(product => {
-            if (product.deleted) return;
-            
-            totalValue += product.price * product.stock;
-            
-            const today = new Date();
-            const expiryDate = new Date(product.expiryDate);
-            const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-            
-            let rowClass = '';
-            let stockBadgeClass = 'stock-high';
-            let stockBadgeText = 'In Stock';
-            let productNameStyle = '';
-            
-            if (product.stock <= 0) {
-                stockBadgeClass = 'stock-low';
-                stockBadgeText = 'Out of Stock';
-            } else if (product.stock <= settings.lowStockThreshold) {
-                stockBadgeClass = 'stock-medium';
-                stockBadgeText = 'Low Stock';
-            }
-            
-            let expiryBadgeClass = 'expiry-good';
-            let expiryBadgeText = 'Good';
-            
-            if (daysUntilExpiry < 0) {
-                expiryBadgeClass = 'expiry-expired';
-                expiryBadgeText = 'Expired';
-                rowClass = 'expired';
-                productNameStyle = 'style="color: red; font-weight: bold;"';
-            } else if (daysUntilExpiry <= settings.expiryWarningDays) {
-                expiryBadgeClass = 'expiry-warning';
-                expiryBadgeText = 'Expiring Soon';
-                rowClass = 'expiring-soon';
-                productNameStyle = 'style="color: red; font-weight: bold;"';
-            }
-            
-            const row = document.createElement('tr');
-            if (rowClass) row.className = rowClass;
-            
-            let actionButtons = '';
-            if (AuthModule.isAdmin()) {
-                actionButtons = `
-                    <div class="action-buttons">
-                        <button class="btn-edit" onclick="editProduct('${product.id}')">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn-delete" onclick="deleteProduct('${product.id}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                `;
-            } else {
-                actionButtons = '<span class="no-permission">Admin only</span>';
-            }
-            
-            row.innerHTML = `
-                <td>${product.id}</td>
-                <td ${productNameStyle}>${product.name}</td>
-                <td>${product.category}</td>
-                <td>${formatCurrency(product.price)}</td>
-                <td>${product.stock}</td>
-                <td>${formatDate(product.expiryDate)}</td>
-                <td>
-                    <span class="stock-badge ${stockBadgeClass}">${stockBadgeText}</span>
-                    <span class="expiry-badge ${expiryBadgeClass}">${expiryBadgeText}</span>
-                </td>
-                <td>
-                    ${actionButtons}
-                </td>
-            `;
-            
-            inventoryTableBody.appendChild(row);
-        });
-        
+
+    if (products.length === 0) {
+        inventoryTableBody.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align: center;">No products in inventory</td>
+            </tr>
+        `;
         const inventoryTotalValue = document.getElementById('inventory-total-value');
-        if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(totalValue);
-    }, 500);
+        if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(0);
+        if (inventoryLoading) inventoryLoading.style.display = 'none';
+        return;
+    }
+
+    let totalValue = 0;
+    const fragment = document.createDocumentFragment();
+    inventoryTableBody.innerHTML = '';
+
+    const today = new Date();
+
+    products.forEach(product => {
+        if (product.deleted) return;
+
+        totalValue += product.price * product.stock;
+
+        const expiryDate = new Date(product.expiryDate);
+        const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+
+        let rowClass = '';
+        let stockBadgeClass = 'stock-high';
+        let stockBadgeText = 'In Stock';
+        let productNameStyle = '';
+
+        if (product.stock <= 0) {
+            stockBadgeClass = 'stock-low';
+            stockBadgeText = 'Out of Stock';
+        } else if (product.stock <= settings.lowStockThreshold) {
+            stockBadgeClass = 'stock-medium';
+            stockBadgeText = 'Low Stock';
+        }
+
+        let expiryBadgeClass = 'expiry-good';
+        let expiryBadgeText = 'Good';
+
+        if (daysUntilExpiry < 0) {
+            expiryBadgeClass = 'expiry-expired';
+            expiryBadgeText = 'Expired';
+            rowClass = 'expired';
+            productNameStyle = 'style="color: red; font-weight: bold;"';
+        } else if (daysUntilExpiry <= settings.expiryWarningDays) {
+            expiryBadgeClass = 'expiry-warning';
+            expiryBadgeText = 'Expiring Soon';
+            rowClass = 'expiring-soon';
+            productNameStyle = 'style="color: red; font-weight: bold;"';
+        }
+
+        const row = document.createElement('tr');
+        if (rowClass) row.className = rowClass;
+
+        let actionButtons = '';
+        if (AuthModule.isAdmin()) {
+            actionButtons = `
+                <div class="action-buttons">
+                    <button class="btn-edit" onclick="editProduct('${product.id}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn-delete" onclick="deleteProduct('${product.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+        } else {
+            actionButtons = '<span class="no-permission">Admin only</span>';
+        }
+
+        row.innerHTML = `
+            <td>${product.id}</td>
+            <td ${productNameStyle}>${product.name}</td>
+            <td>${product.category}</td>
+            <td>${formatCurrency(product.price)}</td>
+            <td>${product.stock}</td>
+            <td>${formatDate(product.expiryDate)}</td>
+            <td>
+                <span class="stock-badge ${stockBadgeClass}">${stockBadgeText}</span>
+                <span class="expiry-badge ${expiryBadgeClass}">${expiryBadgeText}</span>
+            </td>
+            <td>
+                ${actionButtons}
+            </td>
+        `;
+
+        fragment.appendChild(row);
+    });
+
+    inventoryTableBody.appendChild(fragment);
+
+    const inventoryTotalValue = document.getElementById('inventory-total-value');
+    if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(totalValue);
+    if (inventoryLoading) inventoryLoading.style.display = 'none';
 }
 
 function loadSales() {

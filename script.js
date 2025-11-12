@@ -71,6 +71,14 @@ const notificationMessage = document.getElementById('notification-message');
 const mobileMenuBtn = document.getElementById('mobile-menu-btn');
 const sidebar = document.getElementById('sidebar');
 
+function debounce(fn, delay) {
+    let timeoutId;
+    return function(...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
 // Enhanced Stock Alert System
 function checkAndGenerateAlerts() {
     const alerts = {
@@ -2359,6 +2367,7 @@ function loadProducts() {
     }
     
     productsGrid.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     
     products.forEach(product => {
         if (product.deleted) return;
@@ -2399,8 +2408,10 @@ function loadProducts() {
         `;
         
         productCard.addEventListener('click', () => addToCart(product));
-        productsGrid.appendChild(productCard);
+        fragment.appendChild(productCard);
     });
+    
+    productsGrid.appendChild(fragment);
 }
 
 function loadInventory() {
@@ -4473,196 +4484,194 @@ if (logoutBtn) {
 }
 
 // Product search
+function applyProductSearch(searchTerm) {
+    const term = (searchTerm || '').toLowerCase();
+    if (!term) {
+        loadProducts();
+        return;
+    }
+    const filteredProducts = products.filter(product => {
+        const name = (product && product.name ? product.name : '').toLowerCase();
+        const category = (product && product.category ? product.category : '').toLowerCase();
+        const barcode = (product && typeof product.barcode === 'string') ? product.barcode.toLowerCase() : '';
+        return name.includes(term) || category.includes(term) || barcode.includes(term);
+    });
+    if (filteredProducts.length === 0) {
+        productsGrid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <h3>No products found</h3>
+                <p>Try a different search term</p>
+            </div>
+        `;
+        return;
+    }
+    productsGrid.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    filteredProducts.forEach(product => {
+        if (product.deleted) return;
+        const productCard = document.createElement('div');
+        productCard.className = 'product-card';
+        const today = new Date();
+        const expiryDate = new Date(product.expiryDate);
+        const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+        let expiryWarning = '';
+        let productNameStyle = '';
+        if (daysUntilExpiry < 0) {
+            expiryWarning = `<div class="expiry-warning"><i class="fas fa-exclamation-triangle"></i> Expired</div>`;
+            productNameStyle = 'style="color: red; font-weight: bold;"';
+        } else if (daysUntilExpiry <= settings.expiryWarningDays) {
+            expiryWarning = `<div class="expiry-warning"><i class="fas fa-clock"></i> Expires in ${daysUntilExpiry} days</div>`;
+            productNameStyle = 'style="color: red; font-weight: bold;"';
+        }
+        let stockClass = 'stock-high';
+        if (product.stock <= 0) {
+            stockClass = 'stock-low';
+        } else if (product.stock <= settings.lowStockThreshold) {
+            stockClass = 'stock-medium';
+        }
+        productCard.innerHTML = `
+            <div class="product-img">
+                <i class="fas fa-box"></i>
+            </div>
+            <h4 ${productNameStyle}>${product.name}</h4>
+            <div class="price">${formatCurrency(product.price)}</div>
+            <div class="stock ${stockClass}">Stock: ${product.stock}</div>
+            ${expiryWarning}
+        `;
+        productCard.addEventListener('click', () => addToCart(product));
+        fragment.appendChild(productCard);
+    });
+    productsGrid.appendChild(fragment);
+}
+
 const searchBtn = document.getElementById('search-btn');
 if (searchBtn) {
     searchBtn.addEventListener('click', () => {
         const productSearchEl = document.getElementById('product-search');
-        const searchTerm = productSearchEl ? productSearchEl.value.toLowerCase() : '';
-        
-        if (!searchTerm) {
-            loadProducts();
-            return;
-        }
-        
-        const filteredProducts = products.filter(product => {
-            const name = (product && product.name ? product.name : '').toLowerCase();
-            const category = (product && product.category ? product.category : '').toLowerCase();
-            const barcode = (product && typeof product.barcode === 'string') ? product.barcode.toLowerCase() : '';
-            return name.includes(searchTerm) ||
-                   category.includes(searchTerm) ||
-                   barcode.includes(searchTerm);
-        });
-        
-        if (filteredProducts.length === 0) {
-            productsGrid.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-search"></i>
-                    <h3>No products found</h3>
-                    <p>Try a different search term</p>
-                </div>
-            `;
-            return;
-        }
-        
-        productsGrid.innerHTML = '';
-        
-        filteredProducts.forEach(product => {
-            if (product.deleted) return;
-            
-            const productCard = document.createElement('div');
-            productCard.className = 'product-card';
-            
-            const today = new Date();
-            const expiryDate = new Date(product.expiryDate);
-            const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-            
-            let expiryWarning = '';
-            let productNameStyle = '';
-            
-            if (daysUntilExpiry < 0) {
-                expiryWarning = `<div class="expiry-warning"><i class="fas fa-exclamation-triangle"></i> Expired</div>`;
-                productNameStyle = 'style="color: red; font-weight: bold;"';
-            } else if (daysUntilExpiry <= settings.expiryWarningDays) {
-                expiryWarning = `<div class="expiry-warning"><i class="fas fa-clock"></i> Expires in ${daysUntilExpiry} days</div>`;
-                productNameStyle = 'style="color: red; font-weight: bold;"';
-            }
-            
-            let stockClass = 'stock-high';
-            if (product.stock <= 0) {
-                stockClass = 'stock-low';
-            } else if (product.stock <= settings.lowStockThreshold) {
-                stockClass = 'stock-medium';
-            }
-            
-            productCard.innerHTML = `
-                <div class="product-img">
-                    <i class="fas fa-box"></i>
-                </div>
-                <h4 ${productNameStyle}>${product.name}</h4>
-                <div class="price">${formatCurrency(product.price)}</div>
-                <div class="stock ${stockClass}">Stock: ${product.stock}</div>
-                ${expiryWarning}
-            `;
-            
-            productCard.addEventListener('click', () => addToCart(product));
-            productsGrid.appendChild(productCard);
-        });
+        const searchTerm = productSearchEl ? productSearchEl.value : '';
+        applyProductSearch(searchTerm);
     });
 }
 
+const productSearchEl = document.getElementById('product-search');
+if (productSearchEl) {
+    const handler = debounce(() => {
+        applyProductSearch(productSearchEl.value);
+    }, 150);
+    productSearchEl.addEventListener('input', handler);
+}
+
 // Inventory search
+function applyInventorySearch(searchTerm) {
+    const term = (searchTerm || '').toLowerCase();
+    if (!term) {
+        loadInventory();
+        return;
+    }
+    const filteredProducts = products.filter(product => {
+        const name = (product && product.name ? product.name : '').toLowerCase();
+        const category = (product && product.category ? product.category : '').toLowerCase();
+        const idStr = (product && product.id != null) ? String(product.id).toLowerCase() : '';
+        return name.includes(term) || category.includes(term) || idStr.includes(term);
+    });
+    if (filteredProducts.length === 0) {
+        inventoryTableBody.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align: center;">No products found</td>
+            </tr>
+        `;
+        const inventoryTotalValue = document.getElementById('inventory-total-value');
+        if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(0);
+        return;
+    }
+    let totalValue = 0;
+    inventoryTableBody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    const today = new Date();
+    filteredProducts.forEach(product => {
+        if (product.deleted) return;
+        totalValue += product.price * product.stock;
+        const expiryDate = new Date(product.expiryDate);
+        const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+        let rowClass = '';
+        let stockBadgeClass = 'stock-high';
+        let stockBadgeText = 'In Stock';
+        let productNameStyle = '';
+        if (product.stock <= 0) {
+            stockBadgeClass = 'stock-low';
+            stockBadgeText = 'Out of Stock';
+        } else if (product.stock <= settings.lowStockThreshold) {
+            stockBadgeClass = 'stock-medium';
+            stockBadgeText = 'Low Stock';
+        }
+        let expiryBadgeClass = 'expiry-good';
+        let expiryBadgeText = 'Good';
+        if (daysUntilExpiry < 0) {
+            expiryBadgeClass = 'expiry-expired';
+            expiryBadgeText = 'Expired';
+            rowClass = 'expired';
+            productNameStyle = 'style="color: red; font-weight: bold;"';
+        } else if (daysUntilExpiry <= settings.expiryWarningDays) {
+            expiryBadgeClass = 'expiry-warning';
+            expiryBadgeText = 'Expiring Soon';
+            rowClass = 'expiring-soon';
+            productNameStyle = 'style="color: red; font-weight: bold;"';
+        }
+        const row = document.createElement('tr');
+        if (rowClass) row.className = rowClass;
+        let actionButtons = '';
+        if (AuthModule.isAdmin()) {
+            actionButtons = `
+                <div class="action-buttons">
+                    <button class="btn-edit" onclick="editProduct('${product.id}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn-delete" onclick="deleteProduct('${product.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+        } else {
+            actionButtons = '<span class="no-permission">Admin only</span>';
+        }
+        row.innerHTML = `
+            <td>${product.id}</td>
+            <td ${productNameStyle}>${product.name}</td>
+            <td>${product.category}</td>
+            <td>${formatCurrency(product.price)}</td>
+            <td>${product.stock}</td>
+            <td>${formatDate(product.expiryDate)}</td>
+            <td>
+                <span class="stock-badge ${stockBadgeClass}">${stockBadgeText}</span>
+                <span class="expiry-badge ${expiryBadgeClass}">${expiryBadgeText}</span>
+            </td>
+            <td>
+                ${actionButtons}
+            </td>
+        `;
+        fragment.appendChild(row);
+    });
+    inventoryTableBody.appendChild(fragment);
+    const inventoryTotalValue = document.getElementById('inventory-total-value');
+    if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(totalValue);
+}
+
 const inventorySearchBtn = document.getElementById('inventory-search-btn');
 if (inventorySearchBtn) {
     inventorySearchBtn.addEventListener('click', () => {
         const inventorySearchEl = document.getElementById('inventory-search');
-        const searchTerm = inventorySearchEl ? inventorySearchEl.value.toLowerCase() : '';
-        
-        if (!searchTerm) {
-            loadInventory();
-            return;
-        }
-        
-        const filteredProducts = products.filter(product => {
-            const name = (product && product.name ? product.name : '').toLowerCase();
-            const category = (product && product.category ? product.category : '').toLowerCase();
-            const idStr = (product && product.id != null) ? String(product.id).toLowerCase() : '';
-            return name.includes(searchTerm) ||
-                   category.includes(searchTerm) ||
-                   idStr.includes(searchTerm);
-        });
-        
-        if (filteredProducts.length === 0) {
-            inventoryTableBody.innerHTML = `
-                <tr>
-                    <td colspan="8" style="text-align: center;">No products found</td>
-                </tr>
-            `;
-            const inventoryTotalValue = document.getElementById('inventory-total-value');
-            if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(0);
-            return;
-        }
-        
-        let totalValue = 0;
-        inventoryTableBody.innerHTML = '';
-        
-        filteredProducts.forEach(product => {
-            if (product.deleted) return;
-            
-            totalValue += product.price * product.stock;
-            
-            const today = new Date();
-            const expiryDate = new Date(product.expiryDate);
-            const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-            
-            let rowClass = '';
-            let stockBadgeClass = 'stock-high';
-            let stockBadgeText = 'In Stock';
-            let productNameStyle = '';
-            
-            if (product.stock <= 0) {
-                stockBadgeClass = 'stock-low';
-                stockBadgeText = 'Out of Stock';
-            } else if (product.stock <= settings.lowStockThreshold) {
-                stockBadgeClass = 'stock-medium';
-                stockBadgeText = 'Low Stock';
-            }
-            
-            let expiryBadgeClass = 'expiry-good';
-            let expiryBadgeText = 'Good';
-            
-            if (daysUntilExpiry < 0) {
-                expiryBadgeClass = 'expiry-expired';
-                expiryBadgeText = 'Expired';
-                rowClass = 'expired';
-                productNameStyle = 'style="color: red; font-weight: bold;"';
-            } else if (daysUntilExpiry <= settings.expiryWarningDays) {
-                expiryBadgeClass = 'expiry-warning';
-                expiryBadgeText = 'Expiring Soon';
-                rowClass = 'expiring-soon';
-                productNameStyle = 'style="color: red; font-weight: bold;"';
-            }
-            
-            const row = document.createElement('tr');
-            if (rowClass) row.className = rowClass;
-            
-            let actionButtons = '';
-            if (AuthModule.isAdmin()) {
-                actionButtons = `
-                    <div class="action-buttons">
-                        <button class="btn-edit" onclick="editProduct('${product.id}')">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn-delete" onclick="deleteProduct('${product.id}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                `;
-            } else {
-                actionButtons = '<span class="no-permission">Admin only</span>';
-            }
-            
-            row.innerHTML = `
-                <td>${product.id}</td>
-                <td ${productNameStyle}>${product.name}</td>
-                <td>${product.category}</td>
-                <td>${formatCurrency(product.price)}</td>
-                <td>${product.stock}</td>
-                <td>${formatDate(product.expiryDate)}</td>
-                <td>
-                    <span class="stock-badge ${stockBadgeClass}">${stockBadgeText}</span>
-                    <span class="expiry-badge ${expiryBadgeClass}">${expiryBadgeText}</span>
-                </td>
-                <td>
-                    ${actionButtons}
-                </td>
-            `;
-            
-            inventoryTableBody.appendChild(row);
-        });
-        
-        const inventoryTotalValue = document.getElementById('inventory-total-value');
-        if (inventoryTotalValue) inventoryTotalValue.textContent = formatCurrency(totalValue);
+        const searchTerm = inventorySearchEl ? inventorySearchEl.value : '';
+        applyInventorySearch(searchTerm);
     });
+}
+
+const inventorySearchEl = document.getElementById('inventory-search');
+if (inventorySearchEl) {
+    const handler = debounce(() => {
+        applyInventorySearch(inventorySearchEl.value);
+    }, 150);
+    inventorySearchEl.addEventListener('input', handler);
 }
 
 // Product buttons

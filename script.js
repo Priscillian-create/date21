@@ -845,15 +845,23 @@ const DataModule = {
             return expenseDate >= new Date(startDate) && expenseDate <= new Date(endDate);
         });
         
+        const filteredPurchases = purchases.filter(purchase => {
+            const purchaseDate = new Date(purchase.date);
+            return purchaseDate >= new Date(startDate) && purchaseDate <= new Date(endDate);
+        });
+        
         const totalRevenue = filteredSales.reduce((sum, sale) => sum + sale.total, 0);
         const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+        const totalPurchases = filteredPurchases.reduce((sum, purchase) => sum + purchase.amount, 0);
         
         return {
             revenue: totalRevenue,
             expenses: totalExpenses,
-            profit: totalRevenue - totalExpenses,
+            purchases: totalPurchases,
+            profit: totalRevenue - (totalExpenses + totalPurchases),
             salesCount: filteredSales.length,
-            expenseCount: filteredExpenses.length
+            expenseCount: filteredExpenses.length,
+            purchaseCount: filteredPurchases.length
         };
     },
     
@@ -4156,6 +4164,8 @@ async function loadAnalytics() {
         // Update summary cards
         document.getElementById('analytics-revenue').textContent = formatCurrency(profitInfo.revenue);
         document.getElementById('analytics-expenses').textContent = formatCurrency(profitInfo.expenses);
+        const purchasesEl = document.getElementById('analytics-purchases');
+        if (purchasesEl) purchasesEl.textContent = formatCurrency(profitInfo.purchases);
         document.getElementById('analytics-profit').textContent = formatCurrency(profitInfo.profit);
         
         const profitMargin = profitInfo.revenue > 0 ? (profitInfo.profit / profitInfo.revenue * 100).toFixed(2) : 0;
@@ -4163,6 +4173,12 @@ async function loadAnalytics() {
         
         // Create sales trend chart
         createSalesTrendChart(startDate, endDate);
+        
+        // Create purchase trend chart
+        createPurchaseTrendChart(startDate, endDate);
+        
+        // Create expense trend chart
+        createExpenseTrendChart(startDate, endDate);
         
         // Create top products chart
         createTopProductsChart(startDate, endDate);
@@ -4269,6 +4285,124 @@ function createSalesTrendChart(startDate, endDate) {
     chartHTML += '</div>';
     chartHTML += '</div>';
     
+    chartContainer.innerHTML = chartHTML;
+}
+
+function createPurchaseTrendChart(startDate, endDate) {
+    const chartContainer = document.getElementById('purchase-trend-chart');
+    if (!chartContainer) return;
+    const filtered = purchases.filter(purchase => {
+        const d = new Date(purchase.date).toISOString().split('T')[0];
+        return d >= startDate && d <= endDate;
+    });
+    const byDay = {};
+    filtered.forEach(p => {
+        const d = new Date(p.date).toISOString().split('T')[0];
+        if (!byDay[d]) byDay[d] = 0;
+        byDay[d] += p.amount;
+    });
+    const dates = Object.keys(byDay).sort();
+    const values = dates.map(date => byDay[date]);
+    if (dates.length === 0) {
+        chartContainer.innerHTML = '<p>No purchase data for the selected period</p>';
+        return;
+    }
+    let maxValue = Math.max(...values);
+    let chartHTML = '<div class="simple-line-chart">';
+    chartHTML += '<div class="chart-y-axis">';
+    for (let i = 5; i >= 0; i--) {
+        const value = (maxValue / 5) * i;
+        chartHTML += `<div class="y-label">${formatCurrency(value)}</div>`;
+    }
+    chartHTML += '</div>';
+    chartHTML += '<div class="chart-content">';
+    chartHTML += '<div class="chart-grid">';
+    for (let i = 0; i <= 5; i++) {
+        chartHTML += `<div class="grid-line" style="bottom: ${(100/5) * i}%"></div>`;
+    }
+    chartHTML += '</div>';
+    chartHTML += '<div class="chart-data">';
+    dates.forEach((date, index) => {
+        const value = byDay[date];
+        const percentage = (value / maxValue) * 100;
+        if (index > 0) {
+            const prevValue = byDay[dates[index - 1]];
+            const prevPercentage = (prevValue / maxValue) * 100;
+            chartHTML += `
+                <svg class="chart-line" style="position: absolute; left: ${(100 / (dates.length - 1)) * (index - 1)}%; width: ${(100 / (dates.length - 1))}%; height: 100%; top: 0; pointer-events: none;">
+                    <line x1="0" y1="${100 - prevPercentage}%" x2="100%" y2="${100 - percentage}%" stroke="#dc6f4a" stroke-width="2" />
+                </svg>
+            `;
+        }
+        chartHTML += `
+            <div class="chart-point" style="left: ${(100 / (dates.length - 1)) * index}%; bottom: ${percentage}%" title="${date}: ${formatCurrency(value)}">
+                <div class="point"></div>
+                <div class="point-label">${formatDate(date, true)}</div>
+            </div>
+        `;
+    });
+    chartHTML += '</div>';
+    chartHTML += '</div>';
+    chartHTML += '</div>';
+    chartContainer.innerHTML = chartHTML;
+}
+
+function createExpenseTrendChart(startDate, endDate) {
+    const chartContainer = document.getElementById('expense-trend-chart');
+    if (!chartContainer) return;
+    const filtered = expenses.filter(expense => {
+        const d = new Date(expense.date).toISOString().split('T')[0];
+        return d >= startDate && d <= endDate;
+    });
+    const byDay = {};
+    filtered.forEach(e => {
+        const d = new Date(e.date).toISOString().split('T')[0];
+        if (!byDay[d]) byDay[d] = 0;
+        byDay[d] += e.amount;
+    });
+    const dates = Object.keys(byDay).sort();
+    const values = dates.map(date => byDay[date]);
+    if (dates.length === 0) {
+        chartContainer.innerHTML = '<p>No expense data for the selected period</p>';
+        return;
+    }
+    let maxValue = Math.max(...values);
+    let chartHTML = '<div class="simple-line-chart">';
+    chartHTML += '<div class="chart-y-axis">';
+    for (let i = 5; i >= 0; i--) {
+        const value = (maxValue / 5) * i;
+        chartHTML += `<div class="y-label">${formatCurrency(value)}</div>`;
+    }
+    chartHTML += '</div>';
+    chartHTML += '<div class="chart-content">';
+    chartHTML += '<div class="chart-grid">';
+    for (let i = 0; i <= 5; i++) {
+        chartHTML += `<div class="grid-line" style="bottom: ${(100/5) * i}%"></div>`;
+    }
+    chartHTML += '</div>';
+    chartHTML += '<div class="chart-data">';
+    dates.forEach((date, index) => {
+        const value = byDay[date];
+        const percentage = (value / maxValue) * 100;
+        if (index > 0) {
+            const prevValue = byDay[dates[index - 1]];
+            const prevPercentage = (prevValue / maxValue) * 100;
+            chartHTML += `
+                <svg class="chart-line" style="position: absolute; left: ${(100 / (dates.length - 1)) * (index - 1)}%; width: ${(100 / (dates.length - 1))}%; height: 100%; top: 0; pointer-events: none;">
+                    <line x1="0" y1="${100 - prevPercentage}%" x2="100%" y2="${100 - percentage}%" stroke="#4adc6f" stroke-width="2" />
+                </svg>
+            `;
+        }
+        chartHTML += `
+            <div class="chart-point" style="left: ${(100 / (dates.length - 1)) * index}%; bottom: ${percentage}%" title="${date}: ${formatCurrency(value)}">
+                <div class="point"></div>
+                <div class="point-label">${formatDate(date, true)}</div>
+            </div>
+        `;
+    });
+    chartHTML += '</div>';
+    chartHTML += '</div>';
+    chartHTML += '</div>';
     chartContainer.innerHTML = chartHTML;
 }
 

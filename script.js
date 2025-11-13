@@ -1234,21 +1234,36 @@ const DataModule = {
                     
                     if (fetchError) throw fetchError;
                     
-                if (saleData) {
-                    const archivedSale = {
-                        id: saleData.id,
-                        receiptnumber: saleData.receiptnumber || saleData.receiptNumber,
-                        items: saleData.items,
-                        total: saleData.total,
-                        created_at: saleData.created_at,
-                        deleted_at: new Date().toISOString()
-                    };
-                    if (isArchiveEnabled()) {
-                        const { error: insertError } = await supabase
-                            .from('deleted_sales')
-                            .insert(archivedSale);
-                        if (insertError) {
-                            disableArchive();
+                    if (saleData) {
+                        const archivedSale = {
+                            // CHANGED: Removed 'id: saleData.id' to let the database auto-generate a unique ID
+                            original_sale_id: saleData.id, // CHANGED: Store the original sale ID in the new column
+                            receiptnumber: saleData.receiptnumber || saleData.receiptNumber,
+                            items: saleData.items,
+                            total: saleData.total,
+                            created_at: saleData.created_at,
+                            deleted_at: new Date().toISOString()
+                        };
+                        if (isArchiveEnabled()) {
+                            const { error: insertError } = await supabase
+                                .from('deleted_sales')
+                                .insert(archivedSale);
+                            if (insertError) {
+                                disableArchive();
+                                const { error: updateError } = await supabase
+                                    .from('sales')
+                                    .update({ deleted_at: archivedSale.deleted_at })
+                                    .eq('id', saleId);
+                                if (updateError) throw updateError;
+                                return { success: true };
+                            }
+                            const { error: deleteError } = await supabase
+                                .from('sales')
+                                .delete()
+                                .eq('id', saleId);
+                            if (deleteError) throw deleteError;
+                            return { success: true };
+                        } else {
                             const { error: updateError } = await supabase
                                 .from('sales')
                                 .update({ deleted_at: archivedSale.deleted_at })
@@ -1256,27 +1271,21 @@ const DataModule = {
                             if (updateError) throw updateError;
                             return { success: true };
                         }
-                        const { error: deleteError } = await supabase
-                            .from('sales')
-                            .delete()
-                            .eq('id', saleId);
-                        if (deleteError) throw deleteError;
-                        return { success: true };
                     } else {
-                        const { error: updateError } = await supabase
-                            .from('sales')
-                            .update({ deleted_at: archivedSale.deleted_at })
-                            .eq('id', saleId);
-                        if (updateError) throw updateError;
+                        return { success: false, error: 'Sale not found' };
+                    }
+                    } catch (dbError) {
+                        console.error('Database delete failed:', dbError);
+                        showNotification('Failed to delete from database. Marked as deleted locally.', 'warning');
+                        
+                        addToSyncQueue({
+                            type: 'deleteSale',
+                            id: saleId
+                        });
+                        
                         return { success: true };
                     }
                 } else {
-                    return { success: false, error: 'Sale not found' };
-                }
-                } catch (dbError) {
-                    console.error('Database delete failed:', dbError);
-                    showNotification('Failed to delete from database. Marked as deleted locally.', 'warning');
-                    
                     addToSyncQueue({
                         type: 'deleteSale',
                         id: saleId
@@ -1284,21 +1293,13 @@ const DataModule = {
                     
                     return { success: true };
                 }
-            } else {
-                addToSyncQueue({
-                    type: 'deleteSale',
-                    id: saleId
-                });
-                
-                return { success: true };
+            } catch (error) {
+                console.error('Error deleting sale:', error);
+                showNotification('Error deleting sale', 'error');
+                return { success: false, error };
             }
-        } catch (error) {
-            console.error('Error deleting sale:', error);
-            showNotification('Error deleting sale', 'error');
-            return { success: false, error };
         }
-    }
-};
+    };
 
 // Sync Queue Management
 function addToSyncQueue(operation) {
@@ -1632,7 +1633,8 @@ async function syncDeleteSale(operation) {
         
         if (saleData) {
             const archivedSale = {
-                id: saleData.id,
+                // CHANGED: Removed 'id: saleData.id' to let the database auto-generate a unique ID
+                original_sale_id: saleData.id, // CHANGED: Store the original sale's ID in the new column
                 receiptnumber: saleData.receiptnumber || saleData.receiptNumber,
                 items: saleData.items,
                 total: saleData.total,

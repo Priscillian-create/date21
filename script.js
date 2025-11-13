@@ -683,10 +683,10 @@ const DataModule = {
             if (isOnline) {
                 const { data, error } = await supabase.from('deleted_sales').select('*');
                 if (error || !data || data.length === 0) {
-                    const { data: softDeleted, error: softError } = await supabase
+                const { data: softDeleted, error: softError } = await supabase
                         .from('sales')
                         .select('*')
-                        .eq('deleted', true);
+                        .not('deleted_at', 'is', null);
                     if (!softError && softDeleted) {
                         deletedSales = softDeleted;
                         saveToLocalStorage();
@@ -1251,7 +1251,7 @@ const DataModule = {
                     if (insertError) {
                         const { error: updateError } = await supabase
                             .from('sales')
-                            .update({ deleted: true, deleted_at: archivedSale.deleted_at })
+                            .update({ deleted_at: archivedSale.deleted_at })
                             .eq('id', saleId);
                         if (updateError) throw updateError;
                         return { success: true };
@@ -1642,7 +1642,7 @@ async function syncDeleteSale(operation) {
             if (insertError) {
                 const { error: updateError } = await supabase
                     .from('sales')
-                    .update({ deleted: true, deleted_at: archivedSale.deleted_at })
+                    .update({ deleted_at: archivedSale.deleted_at })
                     .eq('id', operation.id);
                 if (updateError) throw updateError;
                 return true;

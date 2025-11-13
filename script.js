@@ -1223,15 +1223,23 @@ const DataModule = {
                     
                     if (fetchError) throw fetchError;
                     
-                    if (saleData) {
-                        saleData.deleted = true;
-                        saleData.deletedAt = new Date().toISOString();
-                        
-                        const { error: insertError } = await supabase
-                            .from('deleted_sales')
-                            .insert(saleData);
-                        
-                        if (insertError) throw insertError;
+                if (saleData) {
+                    const archivedSale = {
+                        id: saleData.id,
+                        receiptnumber: saleData.receiptnumber || saleData.receiptNumber,
+                        items: saleData.items,
+                        total: saleData.total,
+                        cashierid: saleData.cashierid || saleData.cashierId,
+                        created_at: saleData.created_at,
+                        cashier: saleData.cashier,
+                        deleted_at: new Date().toISOString()
+                    };
+                    
+                    const { error: insertError } = await supabase
+                        .from('deleted_sales')
+                        .insert(archivedSale);
+                    
+                    if (insertError) throw insertError;
                         
                         const { error: deleteError } = await supabase
                             .from('sales')
@@ -1602,12 +1610,20 @@ async function syncDeleteSale(operation) {
         if (fetchError) throw fetchError;
         
         if (saleData) {
-            saleData.deleted = true;
-            saleData.deletedAt = new Date().toISOString();
+            const archivedSale = {
+                id: saleData.id,
+                receiptnumber: saleData.receiptnumber || saleData.receiptNumber,
+                items: saleData.items,
+                total: saleData.total,
+                cashierid: saleData.cashierid || saleData.cashierId,
+                created_at: saleData.created_at,
+                cashier: saleData.cashier,
+                deleted_at: new Date().toISOString()
+            };
             
             const { error: insertError } = await supabase
                 .from('deleted_sales')
-                .insert(saleData);
+                .insert(archivedSale);
             
             if (insertError) throw insertError;
             

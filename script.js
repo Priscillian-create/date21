@@ -1243,12 +1243,26 @@ const DataModule = {
                         created_at: saleData.created_at,
                         deleted_at: new Date().toISOString()
                     };
-                    
-                    const { error: insertError } = await supabase
-                        .from('deleted_sales')
-                        .insert(archivedSale);
-                    
-                    if (insertError) {
+                    if (isArchiveEnabled()) {
+                        const { error: insertError } = await supabase
+                            .from('deleted_sales')
+                            .insert(archivedSale);
+                        if (insertError) {
+                            disableArchive();
+                            const { error: updateError } = await supabase
+                                .from('sales')
+                                .update({ deleted_at: archivedSale.deleted_at })
+                                .eq('id', saleId);
+                            if (updateError) throw updateError;
+                            return { success: true };
+                        }
+                        const { error: deleteError } = await supabase
+                            .from('sales')
+                            .delete()
+                            .eq('id', saleId);
+                        if (deleteError) throw deleteError;
+                        return { success: true };
+                    } else {
                         const { error: updateError } = await supabase
                             .from('sales')
                             .update({ deleted_at: archivedSale.deleted_at })
@@ -1256,15 +1270,6 @@ const DataModule = {
                         if (updateError) throw updateError;
                         return { success: true };
                     }
-                    
-                    const { error: deleteError } = await supabase
-                        .from('sales')
-                        .delete()
-                        .eq('id', saleId);
-                    
-                    if (deleteError) throw deleteError;
-                    
-                    return { success: true };
                 } else {
                     return { success: false, error: 'Sale not found' };
                 }
@@ -1634,12 +1639,25 @@ async function syncDeleteSale(operation) {
                 created_at: saleData.created_at,
                 deleted_at: new Date().toISOString()
             };
-            
-            const { error: insertError } = await supabase
-                .from('deleted_sales')
-                .insert(archivedSale);
-            
-            if (insertError) {
+            if (isArchiveEnabled()) {
+                const { error: insertError } = await supabase
+                    .from('deleted_sales')
+                    .insert(archivedSale);
+                if (insertError) {
+                    disableArchive();
+                    const { error: updateError } = await supabase
+                        .from('sales')
+                        .update({ deleted_at: archivedSale.deleted_at })
+                        .eq('id', operation.id);
+                    if (updateError) throw updateError;
+                    return true;
+                }
+                const { error: deleteError } = await supabase
+                    .from('sales')
+                    .delete()
+                    .eq('id', operation.id);
+                if (deleteError) throw deleteError;
+            } else {
                 const { error: updateError } = await supabase
                     .from('sales')
                     .update({ deleted_at: archivedSale.deleted_at })
@@ -1647,13 +1665,6 @@ async function syncDeleteSale(operation) {
                 if (updateError) throw updateError;
                 return true;
             }
-            
-            const { error: deleteError } = await supabase
-                .from('sales')
-                .delete()
-                .eq('id', operation.id);
-            
-            if (deleteError) throw deleteError;
         }
         
         return true;
@@ -1844,6 +1855,13 @@ function cleanupDuplicateSales() {
         sales = uniqueSales;
         saveToLocalStorage();
     }
+}
+function isArchiveEnabled() {
+    const v = localStorage.getItem('ARCHIVE_ENABLED');
+    return v === null ? true : v === 'true';
+}
+function disableArchive() {
+    localStorage.setItem('ARCHIVE_ENABLED', 'false');
 }
 
 function setupRealtimeListeners() {

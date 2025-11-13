@@ -682,10 +682,21 @@ const DataModule = {
         try {
             if (isOnline) {
                 const { data, error } = await supabase.from('deleted_sales').select('*');
-                if (error) throw error;
-                deletedSales = data || [];
-                saveToLocalStorage();
-                return deletedSales;
+                if (error || !data || data.length === 0) {
+                    const { data: softDeleted, error: softError } = await supabase
+                        .from('sales')
+                        .select('*')
+                        .eq('deleted', true);
+                    if (!softError && softDeleted) {
+                        deletedSales = softDeleted;
+                        saveToLocalStorage();
+                        return deletedSales;
+                    }
+                } else {
+                    deletedSales = data || [];
+                    saveToLocalStorage();
+                    return deletedSales;
+                }
             }
             return deletedSales;
         } catch (error) {
@@ -1229,9 +1240,7 @@ const DataModule = {
                         receiptnumber: saleData.receiptnumber || saleData.receiptNumber,
                         items: saleData.items,
                         total: saleData.total,
-                        cashierid: saleData.cashierid || saleData.cashierId,
                         created_at: saleData.created_at,
-                        cashier: saleData.cashier,
                         deleted_at: new Date().toISOString()
                     };
                     
@@ -1239,19 +1248,26 @@ const DataModule = {
                         .from('deleted_sales')
                         .insert(archivedSale);
                     
-                    if (insertError) throw insertError;
-                        
-                        const { error: deleteError } = await supabase
+                    if (insertError) {
+                        const { error: updateError } = await supabase
                             .from('sales')
-                            .delete()
+                            .update({ deleted: true, deleted_at: archivedSale.deleted_at })
                             .eq('id', saleId);
-                        
-                        if (deleteError) throw deleteError;
-                        
+                        if (updateError) throw updateError;
                         return { success: true };
-                    } else {
-                        return { success: false, error: 'Sale not found' };
                     }
+                    
+                    const { error: deleteError } = await supabase
+                        .from('sales')
+                        .delete()
+                        .eq('id', saleId);
+                    
+                    if (deleteError) throw deleteError;
+                    
+                    return { success: true };
+                } else {
+                    return { success: false, error: 'Sale not found' };
+                }
                 } catch (dbError) {
                     console.error('Database delete failed:', dbError);
                     showNotification('Failed to delete from database. Marked as deleted locally.', 'warning');
@@ -1615,9 +1631,7 @@ async function syncDeleteSale(operation) {
                 receiptnumber: saleData.receiptnumber || saleData.receiptNumber,
                 items: saleData.items,
                 total: saleData.total,
-                cashierid: saleData.cashierid || saleData.cashierId,
                 created_at: saleData.created_at,
-                cashier: saleData.cashier,
                 deleted_at: new Date().toISOString()
             };
             
@@ -1625,7 +1639,14 @@ async function syncDeleteSale(operation) {
                 .from('deleted_sales')
                 .insert(archivedSale);
             
-            if (insertError) throw insertError;
+            if (insertError) {
+                const { error: updateError } = await supabase
+                    .from('sales')
+                    .update({ deleted: true, deleted_at: archivedSale.deleted_at })
+                    .eq('id', operation.id);
+                if (updateError) throw updateError;
+                return true;
+            }
             
             const { error: deleteError } = await supabase
                 .from('sales')
